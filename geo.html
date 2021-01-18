@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Geolocation Tracker</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+	<meta name="referrer" content="no-referrer">
+	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A==" crossorigin=""/>
+	<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js" integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA==" crossorigin=""></script>
+	<style>
+	body {
+		padding: 0;
+		margin: 0;
+	}
+	
+	html, body {
+		height: 100%;
+		width: 100vw;
+	}
+	
+	#mapid {
+		height: 90%;
+		width: 100vw;
+	}
+	</style>
+	<script>
+	
+	/*
+	Copyright (c) 2020, Mislav Bozicevic
+	All rights reserved.
+	
+	Redistribution and use in source and binary forms, with or without
+	modification, are permitted provided that the following conditions are met:
+	
+	* Redistributions of source code must retain the above copyright notice, this
+	list of conditions and the following disclaimer.
+	
+	* Redistributions in binary form must reproduce the above copyright notice,
+	this list of conditions and the following disclaimer in the documentation
+	and/or other materials provided with the distribution.
+	
+	THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+	AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+	IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+	DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+	FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+	DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+	SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+	CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+	OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+	OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+	*/
+	
+	/*
+	Dear reader,
+	
+	I am fine with having spaghetti for trival proof of concept code like the one
+	you are reading here. Third party dependencies are limited to just one
+	excellent library: Leaflet.js.
+	
+	Have a nice day.
+	
+	Kind regards,
+	Mislav
+	*/
+
+	var wakeLock = null;
+
+	async function track() {
+		var localStorageAvailable = false;
+		
+		try {
+			let s = window['localStorage'];
+			let x = 'test'
+			s.setItem(x, x);
+			s.removeItem(x);
+			localStorageAvailable = true;
+		}
+		catch (e) {}
+
+		try {
+			if ('wakeLock' in navigator) {
+				wakeLock = await navigator.wakeLock.request('screen');
+				document.addEventListener('visibilitychange', async () => {
+					try {
+						if (wakeLock !== null && document.visibilityState === 'visible') {
+							wakeLock = await navigator.wakeLock.request('screen');
+						}
+					}
+					catch (e) {}
+				});
+			}
+			else {
+				console.log('Screen Wake Lock API is not available.');
+			}
+		}
+		catch (e) {}
+
+		if ('geolocation' in navigator) {
+			document.getElementById('m').textContent = 'Geolocation API is available.';
+			
+			let lmap = L.map('mapid').fitWorld();
+			L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+				attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+			}).addTo(lmap);
+			
+			function success(position) {
+				document.getElementById('m').textContent = '' +
+					'φ=' + position.coords.latitude + '° ' +
+					'λ=' + position.coords.longitude + '° ' +
+					'(±' + (!isNaN(position.coords.precision) ? position.coords.precision : '?') + 'm) ' +
+					'altitude=' + (position.coords.altitude ? position.coords.altitude : '?') + 'm ' +
+					'(±' + (position.coords.altitudeAccuracy ? position.coords.altitudeAccuracy : '?') + 'm) ' +
+					'heading=' + (position.coords.heading ? 
+						(!isNaN(position.coords.heading) ? position.coords.heading : '*') : '?') + '° ' +
+					'speed=' + (position.coords.speed ? position.coords.speed : '?') + 'm/s ' +
+					position.timestamp;
+
+				lmap.flyTo([position.coords.latitude, position.coords.longitude], 16);
+				if (!isNaN(position.coords.precision)) {
+					L.circle([position.coords.latitude, position.coords.longitude], position.coords.precision).addTo(lmap);
+				}
+				else {
+					L.circle([position.coords.latitude, position.coords.longitude]).addTo(lmap);
+				}
+				
+				if (localStorageAvailable === true) {
+					window['localStorage'].setItem(position.timestamp, '' +
+						position.coords.latitude + ' ' +
+						position.coords.longitude + ' ' +
+						(!isNaN(position.coords.precision) ? position.coords.precision : '?') + ' ' +
+						(position.coords.altitude ? position.coords.altitude : '?') + ' ' +
+						(position.coords.altitudeAccuracy ? position.coords.altitudeAccuracy : '?') + ' ' +
+						(position.coords.heading ? (!isNaN(position.coords.heading) ? position.coords.heading : '*') : '?') + ' ' +
+						(position.coords.speed ? position.coords.speed : '?')
+					);
+					
+					let d = calculateDistance();
+					document.getElementById('m').textContent = document.getElementById('m').textContent +
+						' count=' + window['localStorage'].length +
+						' d1=' + d[0] + 'm d2=' + d[1] + 'm';
+
+					L.polyline(getCoords()).addTo(lmap);
+					
+					document.getElementById('s').innerHTML = '' + 
+						'<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAYAAAA7MK6iAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAGDSURBVEhL7ZaxjoMwDEDDIZAKAnUrHWDlK1gQK1/LWnXpX/QH2s6oDCDgsM9RubRAwl2vVLonRbGNiWs7TdDaDvYCPmj+c94n8KPOzOnWrB5rmkbSF3MC/6jU6/Waua5LmhqjGW+3W1YUBWZY1zVmdr1e6el3bNtGP13X0c+yLHY6nejpPaOBPc9jl8sFZdM0cTYMAxfm5eZyVVWol2WJ82azYefzGeVHTPbYcRxcdLfbkWWcJEnwx+V5TpbHLPfvBAXpFyVNU5JuRFFE0r3/EMoZw+aK45g0hjKUVhXlwLBrYXBEXRblwGIpZUsrstzN9Sz+A08CxyM/LgFRl0U5MFwWMDiiLstkYDEbuIX2+z1pDGV+QXBkKiCVcX+hLMtIunE4HEiSCwpMBobDQaWH4Ct1oHROo/i+D6u0q9Wq7e7ktjuXce4PbgMf8A2CgN4eZvA+BjPPNAxD/JoA24A7+sKAj4fj8Yi2/hoisz72foPJHjdNQ5I8Mu8sN+Nn8aLAjH0Cf1n5fuKnkrMAAAAASUVORK5CYII=" alt="Trash" onclick="clearStorage()" />' +
+						'<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAYAAAA7MK6iAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAKkSURBVEhL7ZXJqiIxFIbjPCsOiKgIigO+g67c+cr6IorgVhAUFOep8x/qFKmqVOoKl+5NfxAyWMl/psTQRyL+AWGr/+v8FybUtNfrdREKhQIb836/rZEZY3F1Oh2xXq9FNps1Hni73cTr9bINxrfhsDmYRuFMJkMHzudza0XPdDoV5/P5K3GjWUFWMxCBYCKRsMMetNf4Kw4zBMTm+XyS+P1+F5FIxJFzPzzCai7dheNHoVAQuVzObvCW9/kZbswxigreBOXYzWQyobAfDgdrxYtWuN/vi+12SxsRgXQ6TR4glLFYjL6BVzAKQATfobgQ6tPpRPNutytWq5WdMkf0IKzSbrdhCDX54UeGzp6XSiV7jCZFPtFo1J4nk0nqpVEfGX4at1ot6t14VorFIm2EKISADLljs/TQMccYBvAYewHE2Rg3nuJCCOU6hUweRmsIJdYQKrRqteqYY4yiAhj3ej0aq0XmRnudsBn5Ox6PNL9er7YA2O121KvUajVrJMRisbBG/mivEwoIIpfLhdby+Tz1LD4cDmmuwkaqHrLBWuRBDpBXzheDImKwRVa5I28YI5cA9cG/pVIpahoZb3GpVa1WNJq7qsvl8qdSqdhzFkHjgvSrau09HgwGdI/3+z0VCL/BfI8x5jngewz4nuNO4y91uVxClZoaduPLhdzi8G9frvF4TL364LjxCMNyeAnwZMLy2WxGcz9Go5E18qKe5wDCbuTH1DebTcoPCicej3+k9dRjruYTPB4P6gGvy1thrXjRhhpLnA/ke7PZ2HkC8ACRaDQa2hxyz9/rMOYYIE/SS2umB0fAEL984nc0tbi0LxeD/ASJMnhedT7gEXKLgkCPf4p6uDvUOmGjx9+AgxFuACEWRdTcouDXPP6WX/P4O4T4AxbhtQ8ecowIAAAAAElFTkSuQmCC" alt="Export" onclick="exportAsJSON()" />';
+				}
+			}
+
+			function error() {
+				document.getElementById('m').textContent = 'Sorry, no position available.';
+			}
+
+			const options = {
+				enableHighAccuracy: true,
+				maximumAge: 30000,
+				timeout: 27000
+			};
+
+			const watchID = navigator.geolocation.watchPosition(success, error, options);
+		}
+		else {
+			document.getElementById('m').textContent = 'Geolocation API is not available.';
+		}
+	}
+	
+	function clearStorage() {
+		window['localStorage'].clear();
+		document.getElementById('x').textContent = '';
+		console.log('Storage cleared.');
+	}
+	
+	function exportAsJSON() {
+		document.getElementById('x').textContent = '';
+		let max = window['localStorage'].length;
+		let entries = [];
+		for (let i = 0; i < max; i++) {
+			let key = window['localStorage'].key(i);
+			if (key !== null) {
+				let value = window['localStorage'].getItem(key);
+				if (value !== null) {
+					elements = value.split(' ', 7);
+					entry = {
+						'timestamp': key,
+						'latitude': elements[0],
+						'longitude': elements[1],
+						'precision': elements[2],
+						'altitude': elements[3],
+						'altitudeAccuracy': elements[4],
+						'heading': elements[5],
+						'speed': elements[6]
+					};
+					entries.push(entry);
+				}
+			}
+		}
+		document.getElementById('x').textContent = JSON.stringify(entries);
+		console.log('JSON generated.');
+	}
+	
+	function getCoords() {
+		let max = window['localStorage'].length;
+		let entries = [];
+		for (let i = 0; i < max; i++) {
+			let key = window['localStorage'].key(i);
+			if (key !== null) {
+				let value = window['localStorage'].getItem(key);
+				if (value !== null) {
+					elements = value.split(' ', 7);
+					entry = [key, elements[0], elements[1]];
+					entries.push(entry);
+				}
+			}
+		}
+		entries.sort(function(x, y) {
+			return x[0] < y[0];
+		});
+		
+		let coords = [];
+		for (let i = 0; i < entries.length; i++) {
+			coords.push([entries[i][1], entries[i][2]]);
+		}
+		
+		return coords;
+	}
+	
+	function haversine(lat1, lon1, lat2, lon2) {
+		const R = 6371e3;
+		const φ1 = lat1 * Math.PI/180;
+		const φ2 = lat2 * Math.PI/180;
+		const Δφ = (lat2 - lat1) * Math.PI/180;
+		const Δλ = (lon2 - lon1) * Math.PI/180;
+		
+		const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
+		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+		return R * c;
+	}
+	
+	function sphericalLawOfCosines(lat1, lon1, lat2, lon2) {
+		const R = 6371e3;
+		const φ1 = lat1 * Math.PI/180;
+		const φ2 = lat2 * Math.PI/180;
+		const Δλ = (lon2 - lon1) * Math.PI/180;
+		
+		const d = Math.acos(Math.sin(φ1) * Math.sin(φ2) + Math.cos(φ1) * Math.cos(φ2) * Math.cos(Δλ)) * R;
+		
+		return isNaN(d)? 0 : d;
+	}
+	
+	function calculateDistance() {
+		let max = window['localStorage'].length;
+		let entries = [];
+		for (let i = 0; i < max; i++) {
+			let key = window['localStorage'].key(i);
+			if (key !== null) {
+				let value = window['localStorage'].getItem(key);
+				if (value !== null) {
+					elements = value.split(' ', 7);
+					entry = [key, elements[0], elements[1]];
+					entries.push(entry);
+				}
+			}
+		}
+		entries.sort(function(x, y) {
+			return x[0] < y[0];
+		});
+		
+		let distanceMethod1 = 0;
+		let distanceMethod2 = 0;
+		for (let i = 0; i < entries.length - 1; i++) {
+			distanceMethod1 = distanceMethod1 + haversine(entries[i][1], entries[i][2], entries[i+1][1], entries[i+1][2]);
+			distanceMethod2 = distanceMethod2 + sphericalLawOfCosines(entries[i][1], entries[i][2], entries[i+1][1], entries[i+1][2]);
+		}
+		
+		return [distanceMethod1, distanceMethod2];
+	}
+	</script>
+</head>
+<body onload="track()">
+<noscript>This page is implemented in JavaScript. Please enable it.</noscript>
+<div id="m"></div>
+<div id="s"></div>
+<div id="x"></div>
+<div id="mapid"></div>
+</body>
+</html>
